@@ -1,6 +1,6 @@
 {
   "name": "hermes-mobile",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Capacitor shell reusing the Hermes Desktop React renderer against a remote hermes serve backend.",
   "type": "module",

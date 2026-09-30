@@ -478,7 +478,7 @@ export function createMobileBridge(opts: {
       return null;
     },
     async getVersion() {
-      return { appVersion: '0.2.0-mobile', platform: 'android', electronVersion: '', nodeVersion: '', hermesRoot: '' };
+      return { appVersion: '0.3.0-mobile', platform: 'android', electronVersion: '', nodeVersion: '', hermesRoot: '' };
     },
     profile: {
       async getDefault() {
