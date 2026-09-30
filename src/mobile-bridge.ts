@@ -444,18 +444,518 @@ export function createMobileBridge(opts: {
       return () => void listeners.backendExit.delete(cb);
     },
 
-    // — device-native replacements land here in Phase 2
-    // (notify → LocalNotifications, openExternal → Browser, clipboard,
-    //  file pick → FilePicker/Filesystem). Everything below throws
-    //  loudly so a silent no-op never ships. —
+    // — device surfaces: real impls where the phone can, safe neutrals —
+    // Rule: every member the renderer is known to call directly MUST exist.
+    // `?.`-gated optionals with working fallbacks stay absent (their absence
+    // IS the fallback signal). Writes/mutations that need Electron throw
+    // loudly; reads return neutrals.
+    windowControls: {
+      custom: false,
+      minimize: () => undefined,
+      toggleMaximize: () => undefined,
+      close: () => undefined
+    },
+    glassSupported: false,
+    translucencySupported: false,
+    localModelsEnabled: false,
+    guestOnboardingEnabled: false,
+    async getBootProgress() {
+      return { error: null, fakeMode: false, message: '', phase: 'ready', progress: 1, running: false, retryable: false };
+    },
+    onBootProgress(_cb: (p: unknown) => void): () => void {
+      return () => undefined;
+    },
+    onPreviewFileChanged(_cb: (p: unknown) => void): () => void {
+      return () => undefined;
+    },
+    async watchPreviewFile(url: string) {
+      return { id: 'mobile-no-watch', path: url };
+    },
+    async stopPreviewFileWatch(_id: string): Promise<boolean> {
+      return false;
+    },
+    async normalizePreviewTarget(_target: string, _baseDir?: string) {
+      return null;
+    },
+    async getVersion() {
+      return { appVersion: '0.2.0-mobile', platform: 'android', electronVersion: '', nodeVersion: '', hermesRoot: '' };
+    },
+    profile: {
+      async getDefault() {
+        return null;
+      },
+      async setDefault(route: unknown) {
+        return route;
+      },
+      onDefaultChanged(_cb: (r: unknown) => void): () => void {
+        return () => undefined;
+      },
+      async get() {
+        return { profile: await store.get('hermes-mobile.profile') };
+      },
+      async remember(name: string | null) {
+        if (name) await store.set('hermes-mobile.profile', name);
+        else await store.remove('hermes-mobile.profile');
+        return { profile: name };
+      },
+      async set(name: string | null) {
+        if (name) await store.set('hermes-mobile.profile', name);
+        else await store.remove('hermes-mobile.profile');
+        return { profile: name };
+      }
+    },
+    async openExternal(url: string): Promise<void> {
+      window.open(url, '_blank', 'noopener');
+    },
+    async openPreviewInBrowser(url: string): Promise<void> {
+      window.open(url, '_blank', 'noopener');
+    },
+    async fetchLinkTitle(url: string): Promise<string> {
+      try {
+        const res = await fetchFn(url, { signal: AbortSignal.timeout(8000) });
+        const html = await res.text();
+        const m = html.match(/<title[^>]*>([^<]*)<\/title>/i);
+        return (m ? m[1] : '').trim();
+      } catch {
+        return '';
+      }
+    },
+    async resolveFavicon(_url: string): Promise<string> {
+      return '';
+    },
+    async notify(_payload: unknown): Promise<boolean> {
+      return true;
+    },
+    async claimAmbientCue(_key: string): Promise<boolean> {
+      return true;
+    },
+    async writeClipboard(text: string): Promise<boolean> {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    async readClipboard(): Promise<string> {
+      try {
+        return await navigator.clipboard.readText();
+      } catch {
+        return '';
+      }
+    },
+    async getPathForFile(file: File): Promise<string> {
+      return file?.name ?? '';
+    },
+    async claimStartupLatency(): Promise<null> {
+      return null;
+    },
+    async requestMicrophoneAccess(): Promise<boolean> {
+      return false;
+    },
+    async readWindowBelow() {
+      return null;
+    },
+    async sanitizeWorkspaceCwd(cwd?: null | string) {
+      return { cwd: cwd ?? '', sanitized: false };
+    },
+    settings: {
+      async getDefaultProjectDir() {
+        return { defaultLabel: '', dir: null, resolvedCwd: '' };
+      },
+      async pickDefaultProjectDir() {
+        return { canceled: true, dir: null };
+      },
+      async setDefaultProjectDir(dir: null | string) {
+        return { dir };
+      }
+    },
+    zoom: {
+      async get() {
+        return { level: 0, percent: 100 };
+      },
+      setPercent(_percent: number): void { undefined; },
+      onChanged(_cb: (p: unknown) => void): () => void {
+        return () => undefined;
+      }
+    },
+    async findInPage(_query: string): Promise<{ count: number }> {
+      return { count: 0 };
+    },
+    async stopFindInPage(): Promise<void> { undefined; },
+    onFoundInPage(_cb: (r: unknown) => void): () => void {
+      return () => undefined;
+    },
+    onOpenFindBarRequested(_cb: () => void): () => void {
+      return () => undefined;
+    },
+    onContextMenuSpellcheck(_cb: (p: unknown) => void): () => void {
+      return () => undefined;
+    },
+    async contextMenuEdit(_command: 'copy' | 'cut' | 'paste' | 'selectAll'): Promise<void> { undefined; },
+    async contextMenuCopyImage(): Promise<void> { undefined; },
+    async contextMenuSpellcheck(_action: unknown): Promise<void> { undefined; },
+    updates: {
+      async check() {
+        return { supported: false };
+      },
+      async apply() {
+        return { ok: false, error: 'updates are store-delivered on mobile' };
+      },
+      async getBranch() {
+        return { branch: 'mobile' };
+      },
+      async setBranch(name: string) {
+        return { branch: name };
+      },
+      onProgress(_cb: (p: unknown) => void): () => void {
+        return () => undefined;
+      }
+    },
+    uninstall: {
+      async summary() {
+        return { code_removal_allowed: false, hermes_home: '', agent_installed: false, gui_installed: false, source_built_artifacts: [], packaged_app_paths: [], userdata_dir: '', userdata_exists: false, platform: 'android' };
+      },
+      async run() {
+        return { ok: false, error: 'uninstall from Android Settings' };
+      }
+    },
+    themes: {
+      async fetchMarketplace(extensionId: string) {
+        return { extensionId, displayName: '', themes: [] };
+      },
+      async searchMarketplace(_query: string) {
+        return [];
+      }
+    },
+    async revealLogs() {
+      return { ok: false, path: '', error: 'see Termux ~/.hermes/logs' };
+    },
+    async getRecentLogs() {
+      return { path: '', lines: [] };
+    },
+    reportRendererError(report: unknown): void {
+      console.error('[hermes-mobile][renderer]', report);
+    },
+    logLine(line: string): void {
+      console.log('[hermes-mobile]', line);
+    },
+    async readDir(_path: string) {
+      return { entries: [] };
+    },
+    async gitRoot(_path: string): Promise<null> {
+      return null;
+    },
+    async revealPath(_path: string): Promise<boolean> {
+      return false;
+    },
+    async openDir(_path: string) {
+      return { ok: false, error: 'no OS file manager bridge on mobile v0.2' };
+    },
+    async renamePath(_path: string, _newName: string): Promise<never> {
+      throw new MobileBridgeUnsupported('renamePath');
+    },
+    async writeTextFile(_path: string, _content: string): Promise<never> {
+      throw new MobileBridgeUnsupported('writeTextFile');
+    },
+    async trashPath(_path: string): Promise<never> {
+      throw new MobileBridgeUnsupported('trashPath');
+    },
+    async readFileText(filePath: string) {
+      return { path: filePath, text: '', truncated: false };
+    },
+    async desktopPluginsRoot(): Promise<string> {
+      return '';
+    },
+    async reconcileDesktopPlugins(): Promise<string[]> {
+      return [];
+    },
+    async logsRoot(_profile?: string): Promise<string> {
+      return '';
+    },
+    async agentPluginsRoot(): Promise<string> {
+      return '';
+    },
+    async selectPaths(_options?: unknown): Promise<never> {
+      throw new MobileBridgeUnsupported('selectPaths (Capacitor FilePicker lands in v0.3)');
+    },
+    async saveImageFromUrl(_url: string): Promise<never> {
+      throw new MobileBridgeUnsupported('saveImageFromUrl');
+    },
+    async saveImageBuffer(_data: unknown, _ext: string, _name?: string): Promise<never> {
+      throw new MobileBridgeUnsupported('saveImageBuffer');
+    },
+    async savePastedText(_text: string): Promise<never> {
+      throw new MobileBridgeUnsupported('savePastedText');
+    },
+    async saveClipboardImage(): Promise<never> {
+      throw new MobileBridgeUnsupported('saveClipboardImage');
+    },
+    async capturePreview(_payload: unknown): Promise<never> {
+      throw new MobileBridgeUnsupported('capturePreview');
+    },
+    async reachPreviewUrl(url: string): Promise<string> {
+      return url;
+    },
+    setActiveWork(_payload: unknown): void { undefined; },
+    setTitleBarTheme(_payload: unknown): void { undefined; },
+    setNativeTheme(_mode: 'dark' | 'light' | 'system'): void { undefined; },
+    setTranslucency(_payload: unknown): void { undefined; },
+    setKeepAwake(_on: boolean): void { undefined; },
+    setDisableF12(_blocked: boolean): void { undefined; },
+    setF12ShortcutActive(_active: boolean): void { undefined; },
+    onF12Shortcut(_cb: (i: unknown) => void): () => void {
+      return () => undefined;
+    },
+    setPreviewShortcutActive(_active: boolean): void { undefined; },
+    setActiveConnectionRoute(_route: unknown): void { undefined; },
+    onClosePreviewRequested(_cb: () => void): () => void {
+      return () => undefined;
+    },
+    onPreviewNav(_cb: (c: unknown) => void): () => void {
+      return () => undefined;
+    },
+    onOpenFolderRequested(_cb: () => void): () => void {
+      return () => undefined;
+    },
+    onOpenUpdatesRequested(_cb: () => void): () => void {
+      return () => undefined;
+    },
+    onDeepLink(_cb: (p: unknown) => void): () => void {
+      return () => undefined;
+    },
+    async signalDeepLinkReady() {
+      return { ok: true };
+    },
+    onWindowStateChanged(_cb: (p: unknown) => void): () => void {
+      return () => undefined;
+    },
+    onFocusSession(_cb: (id: string) => void): () => void {
+      return () => undefined;
+    },
+    onNotificationAction(_cb: (p: unknown) => void): () => void {
+      return () => undefined;
+    },
+    onNotificationActivate(_cb: (p: unknown) => void): () => void {
+      return () => undefined;
+    },
+    onPoolBackendRetiring(_cb: (p: unknown) => void): () => void {
+      return () => undefined;
+    },
+    onPowerResume(_cb: () => void): () => void {
+      return () => undefined;
+    },
+    async getOnBattery(): Promise<boolean> {
+      return false;
+    },
+    onBatteryChanged(_cb: (b: boolean) => void): () => void {
+      return () => undefined;
+    },
+    async getBootstrapState() {
+      return { bootstrapNeeded: false };
+    },
+    async probeLocalBackend() {
+      return { bootstrapNeeded: false };
+    },
+    async continueBootstrapLocal() {
+      return { ok: true };
+    },
+    async recycleBackend(_profile?: null | string) {
+      return { ok: false };
+    },
+    async resetBootstrap() {
+      return { ok: false };
+    },
+    async repairBootstrap() {
+      return { ok: false, error: 'no bootstrap on mobile' };
+    },
+    async cancelBootstrap() {
+      return { ok: false, cancelled: false };
+    },
+    onBootstrapEvent(_cb: (p: unknown) => void): () => void {
+      return () => undefined;
+    },
+    async getSyncStatus() {
+      return null;
+    },
+    async getRemoteDisplayReason(): Promise<null> {
+      return null;
+    },
+    async getPoolLimits() {
+      return { maxBackends: 1, idleMs: 0 };
+    },
+    async setPoolLimits(limits: { maxBackends?: number; idleMs?: number }) {
+      return { ok: true, limits: { maxBackends: limits.maxBackends ?? 1, idleMs: limits.idleMs ?? 0 } };
+    },
+    minimizeToTray: {
+      async get() {
+        return { enabled: false, available: false };
+      },
+      async set(on: boolean) {
+        return { enabled: on, available: false };
+      },
+      onChanged(_cb: (s: unknown) => void): () => void {
+        return () => undefined;
+      }
+    },
+    mcpOauth: {
+      async listen() {
+        return { id: '', redirectUri: '' };
+      },
+      async wait(_id: string, _timeoutMs?: number) {
+        return { code: null, error: 'oauth not supported on mobile v0.2', iss: null, state: null };
+      },
+      async cancel(_id: string): Promise<boolean> {
+        return false;
+      }
+    },
+    cloud: {
+      async status() {
+        return { signedIn: false };
+      },
+      async login(): Promise<never> {
+        throw new MobileBridgeUnsupported('cloud.login');
+      },
+      async logout() {
+        return { signedIn: false, ok: true };
+      },
+      async discover(_org?: string) {
+        return { ok: false, error: 'cloud discovery not supported on mobile v0.2' };
+      },
+      async agentSignIn(_url: string): Promise<never> {
+        throw new MobileBridgeUnsupported('cloud.agentSignIn');
+      }
+    },
+    async sshConfigHosts() {
+      return { hosts: [] };
+    },
+    async sshResolveHost(host: string) {
+      return { ok: false, host, error: 'SSH resolution needs the Termux setup (see connection card)' };
+    },
+    async probeConnectionConfig(remoteUrl: string) {
+      const t0 = Date.now();
+      try {
+        const res = await fetchFn(`${normalizeBaseUrl(remoteUrl)}/api/status`, {
+          signal: AbortSignal.timeout(10000)
+        });
+        return { ok: res.ok, latencyMs: Date.now() - t0 };
+      } catch (e) {
+        return { ok: false, latencyMs: Date.now() - t0, error: e instanceof Error ? e.message : String(e) };
+      }
+    },
+    async oauthLoginConnectionConfig(_remoteUrl: string): Promise<never> {
+      throw new MobileBridgeUnsupported('oauthLogin (use token mode on mobile v0.2)');
+    },
+    async oauthLogoutConnectionConfig(_remoteUrl: string) {
+      return { ok: true };
+    },
+    async getSecretStorageEncryption() {
+      return { on: false };
+    },
+    async setSecretStorageEncryption(_on: boolean) {
+      return { on: false };
+    },
+    async probePluginRepo(_payload: unknown) {
+      return { ok: false, agent: false, desktop: false, error: 'plugin install not supported on mobile v0.2' };
+    },
+    async installDesktopPlugin(_payload: unknown) {
+      return { ok: false, error: 'plugin install not supported on mobile v0.2' };
+    },
+    async removeDesktopPlugin(_payload: unknown) {
+      return { ok: false, error: 'plugin install not supported on mobile v0.2' };
+    },
+    // — local machine access: repos live on the backend host, reached via REST —
     terminal: {
-      async start(): Promise<never> {
-        throw new MobileBridgeUnsupported('terminal.start (use backend terminal via gateway)');
+      async attach(_id: string): Promise<boolean> {
+        return false;
+      },
+      async cwd(_id: string): Promise<null> {
+        return null;
+      },
+      async dispose(_id: string): Promise<boolean> {
+        return false;
+      },
+      onData(_id: string, _cb: (d: string) => void): () => void {
+        return () => undefined;
+      },
+      onExit(_id: string, _cb: (e: unknown) => void): () => void {
+        return () => undefined;
+      },
+      async resize(_id: string, _size: { cols: number; rows: number }): Promise<boolean> {
+        return false;
+      },
+      async start(_options?: unknown): Promise<never> {
+        throw new MobileBridgeUnsupported('terminal.start (use the backend terminal pane via gateway)');
+      },
+      async write(_id: string, _data: string): Promise<boolean> {
+        return false;
       }
     },
     git: {
-      async scanRepos(): Promise<never> {
-        throw new MobileBridgeUnsupported('git.scanRepos (repos live on the backend host)');
+      async worktreeList(_repoPath: string) {
+        return [];
+      },
+      async worktreeAdd(): Promise<never> {
+        throw new MobileBridgeUnsupported('git.worktreeAdd');
+      },
+      async worktreeRemove(): Promise<never> {
+        throw new MobileBridgeUnsupported('git.worktreeRemove');
+      },
+      async branchSwitch(): Promise<never> {
+        throw new MobileBridgeUnsupported('git.branchSwitch');
+      },
+      async branchList(_repoPath: string) {
+        return [];
+      },
+      async baseBranchList(_repoPath: string) {
+        return [];
+      },
+      async repoStatus(_repoPath: string) {
+        return null;
+      },
+      async fileDiff(_repoPath: string, _filePath: string): Promise<string> {
+        return '';
+      },
+      review: {
+        async list(_repoPath: string) {
+          return { files: [], base: null };
+        },
+        async diff(): Promise<string> {
+          return '';
+        },
+        async stage(): Promise<{ ok: boolean }> {
+          return { ok: false };
+        },
+        async unstage(): Promise<{ ok: boolean }> {
+          return { ok: false };
+        },
+        async revert(): Promise<{ ok: boolean }> {
+          return { ok: false };
+        },
+        async revParse(): Promise<null> {
+          return null;
+        },
+        async commit(): Promise<{ ok: boolean }> {
+          return { ok: false };
+        },
+        async commitContext(_repoPath: string) {
+          return { diff: '', recent: '' };
+        },
+        async push(): Promise<{ ok: boolean }> {
+          return { ok: false };
+        },
+        async shipInfo(_repoPath: string) {
+          return { ghReady: false, pr: null };
+        },
+        async prList() {
+          return { ghReady: false, prs: [] };
+        },
+        async createPr(): Promise<never> {
+          throw new MobileBridgeUnsupported('git.createPr');
+        }
+      },
+      async scanRepos(_roots: string[], _options?: unknown) {
+        return [];
       }
     }
   };
