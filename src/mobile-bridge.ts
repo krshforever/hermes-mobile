@@ -306,9 +306,14 @@ export function createMobileBridge(opts: {
       async save(input: Omit<RegistryConnection, 'id'> & { id?: string }) {
         const rows = await readRegistry();
         const id = input.id ?? `conn_${Date.now().toString(36)}`;
+        // A blank token field means "don't change", never "erase": Settings
+        // submits '' when the user only edited the URL, and wiping a good
+        // token turns every later dial into a rejected socket.
+        const { token, ...rest } = input;
+        const patch = token !== undefined && token.trim() === '' ? rest : input;
         const next = rows.some((r) => r.id === id)
-          ? rows.map((r) => (r.id === id ? { ...r, ...input, id } : r))
-          : [...rows, { ...input, id }];
+          ? rows.map((r) => (r.id === id ? { ...r, ...patch, id } : r))
+          : [{ ...patch, id } as RegistryConnection];
         await writeRegistry(next);
         return { ok: true as const, connection: next.find((r) => r.id === id)!, registry: next };
       },
@@ -356,8 +361,13 @@ export function createMobileBridge(opts: {
     async saveConnectionConfig(input: { remoteUrl: string; remoteToken?: string }) {
       const rows = await readRegistry();
       const primary = rows.find((r) => r.isPrimary) ?? rows[0];
+      const token = input.remoteToken?.trim() ? input.remoteToken : undefined;
       if (primary) {
-        await this.connections.save({ ...primary, baseUrl: input.remoteUrl, token: input.remoteToken ?? primary.token });
+        await this.connections.save({
+          ...primary,
+          baseUrl: input.remoteUrl,
+          ...(token === undefined ? {} : { token })
+        });
       } else {
         const saved = await this.connections.save({ label: 'Primary backend', baseUrl: input.remoteUrl, kind: 'url', token: input.remoteToken });
         await this.connections.setPrimary(saved.connection.id);
