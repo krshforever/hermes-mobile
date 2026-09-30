@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.log
+.hermes-dev-token
+.mobile-dev-token
+android/app/build/
+android/.gradle/
+android/local.properties
+android/app/src/main/assets/
+.DS_Store

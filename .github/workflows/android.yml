@@ -1,0 +1,58 @@
+name: android-apk
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: mobile
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Typecheck bridge
+        working-directory: mobile
+        run: |
+          npm install --no-audit --no-fund
+          node node_modules/typescript/bin/tsc --noEmit
+
+      - name: Fetch upstream renderer (sparse)
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/NousResearch/hermes-agent.git upstream
+          cd upstream
+          git sparse-checkout set --skip-checks apps/desktop apps/shared
+
+      - name: Build upstream renderer
+        working-directory: upstream
+        run: |
+          npm install --no-audit --no-fund
+          npm run build --workspace=apps/desktop || (cd apps/desktop && node ../../node_modules/.bin/vite build 2>/dev/null || npm run build)
+          ls apps/desktop/dist/index.html
+
+      - name: Assemble Capacitor app
+        working-directory: mobile
+        run: |
+          rm -rf dist && cp -r ../upstream/apps/desktop/dist dist
+          node node_modules/@capacitor/cli/bin/capacitor add android || true
+          node node_modules/@capacitor/cli/bin/capacitor sync android
+
+      - name: Build debug APK
+        working-directory: mobile/android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hermes-mobile-debug
+          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk

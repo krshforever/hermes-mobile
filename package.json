@@ -1,0 +1,25 @@
+{
+  "name": "hermes-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Capacitor shell reusing the Hermes Desktop React renderer against a remote hermes serve backend.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "cap:sync": "cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.6.9",
+    "@capacitor/browser": "^7.0.0",
+    "@capacitor/clipboard": "^7.0.0",
+    "@capacitor/core": "^7.6.9",
+    "@capacitor/filesystem": "^7.0.0",
+    "@capacitor/local-notifications": "^7.0.0",
+    "@capacitor/preferences": "^7.0.0",
+    "@capacitor/share": "^7.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.6.9",
+    "typescript": "^5.9.3"
+  }
+}
