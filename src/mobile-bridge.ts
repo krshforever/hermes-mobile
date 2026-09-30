@@ -752,7 +752,20 @@ export function createMobileBridge(opts: {
       return () => undefined;
     },
     async getBootstrapState() {
-      return { bootstrapNeeded: false };
+      // Install already exists (backend is running) — report a completed,
+      // inactive bootstrap so the onboarding/install screen stays away.
+      return {
+        active: false,
+        manifest: null,
+        stages: {},
+        error: null,
+        log: [],
+        startedAt: null,
+        completedAt: Date.now(),
+        setupChoice: null,
+        unsupportedPlatform: null,
+        bundled: false
+      };
     },
     async probeLocalBackend() {
       return { bootstrapNeeded: false };
