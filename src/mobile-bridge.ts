@@ -326,19 +326,24 @@ export function createMobileBridge(opts: {
         listeners.connectionApplied.forEach((fn) => fn());
         return { ok: true as const, registry: next };
       },
-      async test(id: string): Promise<{ ok: boolean; latencyMs: number; error?: string }> {
+      async test(id: string) {
         const rows = await readRegistry();
         const hit = rows.find((r) => r.id === id);
-        if (!hit) return { ok: false, latencyMs: 0, error: 'unknown connection' };
-        const t0 = Date.now();
+        if (!hit) {
+          return { baseUrl: '', ok: false, reachable: false, version: null, error: 'unknown connection' };
+        }
+        const baseUrl = normalizeBaseUrl(hit.baseUrl);
         try {
-          const res = await fetchFn(`${normalizeBaseUrl(hit.baseUrl)}/api/status`, {
+          const res = await fetchFn(`${baseUrl}/api/status`, {
             headers: { ...sessionTokenHeaders(hit.token) }
           });
-          if (!res.ok) return { ok: false, latencyMs: Date.now() - t0, error: `status ${res.status}` };
-          return { ok: true, latencyMs: Date.now() - t0 };
+          if (!res.ok) {
+            return { baseUrl, ok: false, reachable: true, version: null, error: `status ${res.status}` };
+          }
+          const json = (await res.json()) as { version?: string };
+          return { baseUrl, ok: true, reachable: true, version: json.version ?? null, error: null };
         } catch (e) {
-          return { ok: false, latencyMs: Date.now() - t0, error: e instanceof Error ? e.message : String(e) };
+          return { baseUrl, ok: false, reachable: false, version: null, error: e instanceof Error ? e.message : String(e) };
         }
       }
     },
@@ -372,7 +377,7 @@ export function createMobileBridge(opts: {
       kind?: 'ssh' | 'url';
       sshHost?: string;
       sshUser?: string;
-    }): Promise<{ ok: boolean; latencyMs: number; error?: string }> {
+    }): Promise<{ baseUrl: string; ok: boolean; reachable: boolean; version: string | null; error: string | null }> {
       const baseUrl = normalizeBaseUrl(input.baseUrl);
       const saved = await this.connections.save({
         id: PHONE_ROW_ID,
@@ -389,14 +394,18 @@ export function createMobileBridge(opts: {
       return probed;
     },
     async testConnectionConfig(input: { remoteUrl: string; remoteToken?: string }) {
-      const t0 = Date.now();
+      const baseUrl = normalizeBaseUrl(input.remoteUrl);
       try {
-        const res = await fetchFn(`${normalizeBaseUrl(input.remoteUrl)}/api/status`, {
+        const res = await fetchFn(`${baseUrl}/api/status`, {
           headers: { ...sessionTokenHeaders(input.remoteToken) }
         });
-        return { ok: res.ok, latencyMs: Date.now() - t0 };
+        if (!res.ok) {
+          return { baseUrl, ok: false, reachable: true, version: null, error: `status ${res.status}` };
+        }
+        const json = (await res.json()) as { version?: string };
+        return { baseUrl, ok: true, reachable: true, version: json.version ?? null, error: null };
       } catch (e) {
-        return { ok: false as const, latencyMs: Date.now() - t0, error: e instanceof Error ? e.message : String(e) };
+        return { baseUrl, ok: false, reachable: false, version: null, error: e instanceof Error ? e.message : String(e) };
       }
     },
 
@@ -846,14 +855,36 @@ export function createMobileBridge(opts: {
       return { ok: false, host, error: 'SSH resolution needs the Termux setup (see connection card)' };
     },
     async probeConnectionConfig(remoteUrl: string) {
-      const t0 = Date.now();
+      // Real DesktopConnectionProbeResult: the settings probe gates on
+      // `reachable` (a wrong shape reads as unreachable — that exact bug).
+      const baseUrl = normalizeBaseUrl(remoteUrl);
       try {
-        const res = await fetchFn(`${normalizeBaseUrl(remoteUrl)}/api/status`, {
-          signal: AbortSignal.timeout(10000)
-        });
-        return { ok: res.ok, latencyMs: Date.now() - t0 };
+        const res = await fetchFn(`${baseUrl}/api/status`, { signal: AbortSignal.timeout(10000) });
+        if (!res.ok) {
+          return { baseUrl, reachable: false, authMode: 'unknown' as const, providers: [], version: null, error: `status ${res.status}` };
+        }
+        const json = (await res.json()) as {
+          version?: string;
+          auth_required?: boolean;
+          auth_providers?: Array<{ id?: string } | string>;
+        };
+        return {
+          baseUrl,
+          reachable: true,
+          authMode: (json.auth_required ? 'oauth' : 'token') as 'oauth' | 'token',
+          providers: Array.isArray(json.auth_providers) ? json.auth_providers : [],
+          version: json.version ?? null,
+          error: null
+        };
       } catch (e) {
-        return { ok: false, latencyMs: Date.now() - t0, error: e instanceof Error ? e.message : String(e) };
+        return {
+          baseUrl,
+          reachable: false,
+          authMode: 'unknown' as const,
+          providers: [],
+          version: null,
+          error: e instanceof Error ? e.message : String(e)
+        };
       }
     },
     async oauthLoginConnectionConfig(_remoteUrl: string): Promise<never> {
