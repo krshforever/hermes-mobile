@@ -7,7 +7,59 @@ const bridge = installMobileBridge();
 
 globalThis.hermesMobile = {
   version: '0.2.0',
-  quickConnect: (input) => bridge.quickConnect(input)
+  quickConnect: (input) => bridge.quickConnect(input),
+  // On-demand diagnostics (call-only, never automatic): snapshots bridge
+  // health + last bridge calls for bug reports. Usage (remote console):
+  //   await hermesMobile.debug()
+  async debug() {
+    const out = { version: '0.2.0', checks: {} };
+    try {
+      const conn = await bridge.getConnection(null);
+      out.checks.connection = { base: conn.baseUrl, token_len: (conn.token || '').length };
+    } catch (e) {
+      out.checks.connection = { error: String((e && e.message) || e) };
+    }
+    try {
+      const r = await bridge.api({ path: '/api/profiles', timeoutMs: 15000 });
+      out.checks.profiles = { ok: true, count: (r && (r.profiles || r).length) ?? '?' };
+    } catch (e) {
+      out.checks.profiles = { ok: false, error: String((e && e.message) || e) };
+    }
+    try {
+      const conn = await bridge.getConnection(null);
+      const ok = await new Promise((resolve) => {
+        let done = false;
+        const fin = (v) => {
+          if (!done) {
+            done = true;
+            resolve(v);
+          }
+        };
+        const t = setTimeout(() => fin('TIMEOUT'), 10000);
+        try {
+          const ws = new WebSocket(conn.wsUrl);
+          ws.addEventListener('open', () => {
+            clearTimeout(t);
+            try {
+              ws.close();
+            } catch (_) {}
+            fin('OPEN');
+          });
+          ws.addEventListener('error', () => fin('ERROR'));
+          ws.addEventListener('close', (ev) => {
+            clearTimeout(t);
+            fin('CLOSE ' + ev.code);
+          });
+        } catch (e) {
+          fin('THREW ' + ((e && e.message) || e));
+        }
+      });
+      out.checks.websocket = ok;
+    } catch (e) {
+      out.checks.websocket = 'THREW ' + ((e && e.message) || e);
+    }
+    return out;
+  }
 };
 
 // Deep-link provisioning (also how the Termux connection card onboards):
