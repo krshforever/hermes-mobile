@@ -8,3 +8,5 @@ android/.gradle/
 android/local.properties
 android/app/src/main/assets/
 .DS_Store
+dist-bridge/
+artifact/

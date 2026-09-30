@@ -4,11 +4,13 @@
  * needs in thin-client mode (phone talks to a remote `hermes serve`).
  *
  * Source of truth for the full surface:
- *   hermes-agent/apps/desktop/src/global.d.ts  (~640 lines)
+ *   hermes-agent/apps/desktop/src/global.d.ts
  * Source of truth for request routing semantics:
  *   hermes-agent/apps/desktop/src/api/client.ts (hermesApi, *_scoped helpers)
  *   hermes-agent/apps/desktop/electron/api-transport.ts (REST dispatch)
- * Reconcile `HermesApiRequest` against those before Phase 2 smoke tests.
+ *   hermes-agent/apps/desktop/electron/connection-config.ts (token model:
+ *     REST X-Hermes-Session-Token, WS ?token=, spawner mints via
+ *     HERMES_DASHBOARD_SESSION_TOKEN)
  */
 
 // ── Types (subset of desktop's global.d.ts; same names, mobile scope) ────────
@@ -65,7 +67,7 @@ interface GatewayWsUrl {
   token: string;
 }
 
-// ── Storage seam (Preferences on-device, in-memory fallback for web) ─────────
+// ── Storage: localStorage in the WebView (persists), memory fallback ────────
 
 interface KVStore {
   get(key: string): Promise<string | null>;
@@ -79,6 +81,21 @@ const memoryStore = (): KVStore => {
     get: async (k) => (map.has(k) ? map.get(k)! : null),
     set: async (k, v) => void map.set(k, v),
     remove: async (k) => void map.delete(k)
+  };
+};
+
+const localStorageStore = (): KVStore => {
+  try {
+    if (typeof localStorage === 'undefined') return memoryStore();
+    localStorage.setItem('hermes-mobile.probe', '1');
+    localStorage.removeItem('hermes-mobile.probe');
+  } catch {
+    return memoryStore();
+  }
+  return {
+    get: async (k) => localStorage.getItem(k),
+    set: async (k, v) => void localStorage.setItem(k, v),
+    remove: async (k) => void localStorage.removeItem(k)
   };
 };
 
@@ -122,8 +139,9 @@ export function createMobileBridge(opts: {
   defaultBaseUrl?: string;
   defaultToken?: string;
 }) {
-  const store = opts.store ?? memoryStore();
+  const store = opts.store ?? localStorageStore();
   const fetchFn = opts.fetchFn ?? fetch;
+  const defaultBaseUrl = opts.defaultBaseUrl ?? 'http://127.0.0.1:9119';
 
   const readRegistry = async (): Promise<RegistryConnection[]> => {
     const raw = await store.get(REGISTRY_KEY);
@@ -140,14 +158,22 @@ export function createMobileBridge(opts: {
   const sessionTokenHeaders = (token?: string): Record<string, string> =>
     token ? { 'X-Hermes-Session-Token': token } : {};
 
+  const PHONE_ROW_ID = 'phone-termux';
+
   const resolveActive = async (): Promise<RegistryConnection> => {
     const [rows, activeId] = await Promise.all([readRegistry(), store.get(ACTIVE_KEY)]);
     const hit = rows.find((r) => r.id === activeId) ?? rows.find((r) => r.isPrimary) ?? rows[0];
     if (hit) return hit;
-    if (opts.defaultBaseUrl) {
-      return { id: 'default', label: 'Default backend', baseUrl: opts.defaultBaseUrl, kind: 'url', token: opts.defaultToken };
-    }
-    throw new Error('[hermes-mobile] no backend connection saved yet — add one in Settings → Connections');
+    // First run: the phone itself. The renderer's own remote-setup UI handles
+    // the token entry (it was built for remote backends); authed calls 401
+    // until the user pastes the token from the Termux connection card.
+    return {
+      id: PHONE_ROW_ID,
+      label: 'This phone (Termux)',
+      baseUrl: defaultBaseUrl,
+      kind: 'url',
+      token: opts.defaultToken
+    };
   };
 
   const toConnection = (row: RegistryConnection, profile?: null | string): HermesConnection => ({
@@ -335,6 +361,32 @@ export function createMobileBridge(opts: {
     },
     applyConnectionConfig(input: { remoteUrl: string; remoteToken?: string }) {
       return this.saveConnectionConfig(input);
+    },
+    // One-tap connect from the pasted Termux connection card (URL + token).
+    // Upserts the phone row and makes it primary. SSH rows keep host/user for
+    // CLI parity; the data plane is always the serve URL (loopback locally).
+    async quickConnect(input: {
+      baseUrl: string;
+      token?: string;
+      label?: string;
+      kind?: 'ssh' | 'url';
+      sshHost?: string;
+      sshUser?: string;
+    }): Promise<{ ok: boolean; latencyMs: number; error?: string }> {
+      const baseUrl = normalizeBaseUrl(input.baseUrl);
+      const saved = await this.connections.save({
+        id: PHONE_ROW_ID,
+        label: input.label ?? 'This phone (Termux)',
+        baseUrl,
+        kind: input.kind ?? 'url',
+        token: input.token,
+        ...(input.sshHost ? { sshHost: input.sshHost } : {}),
+        ...(input.sshUser ? { sshUser: input.sshUser } : {})
+      });
+      await this.connections.setPrimary(saved.connection.id);
+      const probed = await this.connections.test(saved.connection.id);
+      listeners.connectionApplied.forEach((fn) => fn());
+      return probed;
     },
     async testConnectionConfig(input: { remoteUrl: string; remoteToken?: string }) {
       const t0 = Date.now();

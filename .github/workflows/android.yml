@@ -45,6 +45,21 @@ jobs:
         working-directory: mobile
         run: |
           rm -rf dist && cp -r ../upstream/apps/desktop/dist dist
+          node node_modules/typescript/bin/tsc src/mobile-bridge.ts --outDir dist --module esnext --target es2022 --moduleResolution bundler --strict --skipLibCheck
+          cp src/boot-init.js dist/boot-init.js
+          node --check dist/mobile-bridge.js && node --check dist/boot-init.js
+          python3 - <<'EOF'
+          import pathlib
+          p = pathlib.Path('dist/index.html')
+          html = p.read_text()
+          tag = '<script type="module" src="./boot-init.js"></script>'
+          assert tag not in html, 'bridge already injected?'
+          anchor = '<script type="module"'
+          i = html.find(anchor)
+          assert i > 0, 'no renderer module script found'
+          p.write_text(html[:i] + tag + '\n    ' + html[i:])
+          print('bridge injected before renderer entry')
+          EOF
           node node_modules/@capacitor/cli/bin/capacitor add android || true
           node node_modules/@capacitor/cli/bin/capacitor sync android
 
